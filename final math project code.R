@@ -1,6 +1,23 @@
 
 #  Chennai Reservoir Levels & Rainfall Analysis
 
+#Initial import from github
+levels_url <- "https://raw.githubusercontent.com/marishaabell88/Shortage-Warning-/refs/heads/main/chennai_reservoir_levels.csv"
+rainfall_url <- "https://raw.githubusercontent.com/marishaabell88/Shortage-Warning-/refs/heads/main/chennai_reservoir_rainfall.csv"
+
+#Download both scripts automatically when running the script
+download.file(
+  url = levels_url,
+  destfile = "chennai_reservoir_levels.csv",
+  mode = "wb"
+)
+
+download.file(
+  url = rainfall_url,
+  destfile = "chennai_reservoir_rainfall.csv",
+  mode = "wb"
+)
+
 #  1. Libraries
 req <- c("readr","dplyr","ggplot2","tidyr","lubridate","broom","randomForest","pROC")
 for (p in req) if (!requireNamespace(p, quietly=TRUE)) install.packages(p)
@@ -385,6 +402,39 @@ if (isTRUE(main$ok)) {
     labs(title = "Warnings issued in the test period (squares = warning that month)",
          x = "Date", y = "% of capacity") + theme_minimal(base_size = 13)
   ggsave("warning_timeline.png", p_time, width = 10, height = 5); print(p_time)
+}
+
+if (isTRUE(main$ok)) {
+  wt_tab <- main$warn_table
+  
+  # Figure 9: logistic curve (other predictors held at training medians)
+  tr <- main$logit$model
+  med <- lapply(tr[, c("Monsoon","Rain","Rain_L1","Rain_L2")], median)
+  grid <- tibble(Storage_Pct = seq(0, 60, 0.5),
+                 Monsoon = med$Monsoon, Rain = med$Rain,
+                 Rain_L1 = med$Rain_L1, Rain_L2 = med$Rain_L2)
+  grid$Prob <- predict(main$logit, newdata = grid, type = "response")
+  
+  p_logit <- ggplot() +
+    geom_line(data = grid, aes(Storage_Pct, Prob), colour = "steelblue", linewidth = 1) +
+    geom_point(data = wt_tab, aes(Storage_Pct, as.integer(Next_Shortage)),
+               alpha = 0.6, position = position_jitter(height = 0.02, width = 0)) +
+    geom_hline(yintercept = 0.5, linetype = "dashed", colour = "grey40") +
+    labs(title = "Logistic regression: probability of next-month shortage",
+         x = "Current storage (% of capacity)",
+         y = "Predicted probability (points = test months)") +
+    theme_minimal(base_size = 13)
+  ggsave("logistic_curve.png", p_logit, width = 8, height = 5); print(p_logit)
+  
+  # Figure 10: ROC curves, logistic vs random forest (test set)
+  y <- as.integer(wt_tab$Next_Shortage)
+  roc_log <- pROC::roc(y, wt_tab$Prob_Logistic, levels = c(0, 1), direction = "<", quiet = TRUE)
+  roc_rf  <- pROC::roc(y, wt_tab$Prob_Forest,   levels = c(0, 1), direction = "<", quiet = TRUE)
+  p_roc <- pROC::ggroc(list(Logistic = roc_log, "Random forest" = roc_rf)) +
+    geom_abline(intercept = 1, slope = 1, linetype = "dashed", colour = "grey60") +
+    labs(title = "ROC curves on the test set", colour = "Model") +
+    theme_minimal(base_size = 13)
+  ggsave("roc_curves.png", p_roc, width = 7, height = 5); print(p_roc)
 }
 
 #  7. EXPORT
